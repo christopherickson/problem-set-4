@@ -1,11 +1,11 @@
 ---
 title: "Problem Set 4"
-author: "Your Name Here"
-date: "3/9/2017"
+author: "Chris Erickson"
+date: "3/16/2017"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=TRUE}
 knitr::opts_chunk$set(echo = TRUE, comment = "#>")
 ```
 
@@ -17,7 +17,7 @@ knitr::opts_chunk$set(echo = TRUE, comment = "#>")
 1. Publish HTML on Rpubs (you will need to sign up for the free account) and *add the link below*.
 1. Submit a PR with your answers.
 
-*Link to Rpubs document:* XXX
+*https://rpubs.com/christopherickson/264242:* XXX
 
 # Overview
 
@@ -35,9 +35,9 @@ devtools::install_github("jayhesselberth/nihexporter")
 Read the [Overview vignette](http://jayhesselberth.github.io/nihexporter/articles/nihexporter.html) to learn the structure of the pacakge. Take a look at two tables from the package:
 
 ```{r overview}
-library(nihexporter)
-library(tidyverse)
-library(broom)
+library(nihexporter) #data
+library(tidyverse) #for data arrangement, analysis, presentation
+library(broom) #for tidying data
 
 projects
 project_io
@@ -49,11 +49,16 @@ project_io
 
 The `projects` and `project_io` tables have the `r intersect(names(projects), names(project_io))` column in common. Use this column to perform a `left_join` and identify the most expensive project for each institute. Project institutes are in the `projects` table, whereas total project costs are available in the `project_io` table. Note you will have to use the `arrange` and `slice` verbs from `dplyr`.
 
-```{r problem_1, eval=FALSE}
-... %>%
-  left_join(...) %>%
-  arrange(...) %>%
-  slice(...)
+```{r problem_1, eval=TRUE}
+projects %>% select(project.num, institute) %>%
+  left_join(project_io) %>% 
+  select(project.num, institute, total.cost) -> combined 
+  group_by(combined, institute) %>%
+  arrange(desc(total.cost)) %>%
+  slice(1:1) %>%       #Slice extracts the top one row from each group (1:2 would take top 2 rows, etc)
+  arrange(desc(total.cost)) -> top_25
+  top_25
+  
 ```
 
 ## Problem 2
@@ -61,15 +66,21 @@ The `projects` and `project_io` tables have the `r intersect(names(projects), na
 Create a plot that describes the change in output (number of publications) for the most expensive grant from the above list. Note that you cannot use `n.pubs` for this, as that is an aggregate count over time. You need a tbl of following structure, which you can then use to calculate the number of publications each year (hint: use `n()` in a `summarize` statement:
 
 ```{r p2_tbl}
-projects %>%
-  head() %>%
-  left_join(publinks) %>%
-  left_join(publications) %>%
-  select(project.num, fiscal.year, fy.cost, pmid) %>%
-  na.omit()
-```
 
-```{r problem_2}
+ungroup(top_25) %>% # Have to ungroup to separate the institutes
+  slice(1:1) -> top_project 
+  projects %>%
+  semi_join(top_project, by = "project.num") %>% #Semi-join returns all rows from 'projects' that have matching project.num values from the 'top-project'. This is a filtering join.
+  left_join(publinks) %>% #Left_join adds the pmid to the previous tbl, based on the common project.num value. This is a mutating join.
+  left_join(publications) %>% #Left_join adds other publication data based on the pmid value
+  select(project.num, pub.year, fy.cost, pmid) %>%
+  na.omit() -> top_data
+  
+  top_data %>% group_by(pub.year) %>% 
+  summarize(total.pubs = n()) -> total_pubs
+  
+  ggplot(total_pubs, aes(pub.year, total.pubs)) + geom_point() + geom_smooth()
+  
 ```
 
 ## Problem 3
@@ -77,16 +88,29 @@ projects %>%
 Use the `projects` and `clinical_studies` table to calculate how many clinical studies have been started by projects from each institute.
 
 ```{r problem_3}
+
+#First, we want only the rows of 'projects' that are found in 'clinical_studies'. We can do this by joining with innerjoin. We can then group by the institute and find the number or projects using summarise.
+
+inner_join(clinical_studies, projects, by = "project.num") %>% #Inner_join returns only the rows in clinical_studies that match the projects. Because project.num is the only common column between these tbls, could also use left_join here. 
+group_by(institute) %>%
+filter(!is.na(institute)) %>% 
+summarise(num_proj = n()) 
+
+
 ```
 
 ## Problem 4
 
 Calculate correlations between `total.cost` and `n.pubs` for each institute. You will need to `join` the `projects` and `project_io` tables to link `institute` with `total.cost` and `n.pubs`. You will then need to use `group_by` and `do` from `dplyr` and `tidy` from `broom` to calculate correlations.
 
-```{r problem_2, eval=FALSE}
-tab %>%
-  group_by(...) %>%
-  do(tidy(cor(..., ...)))
+```{r problem_4, eval=TRUE}
+
+left_join(projects, project_io, by = "project.num") %>% #Left_join to add all columns from project_io to the projects tbl. Could also use inner_join, becasue the only common column is project.num, so no data would be lost. 
+  select(institute, n.pubs, total.cost) %>% #Selecting only these columns
+  group_by(institute) %>% #Grouping by institute
+  na.omit() %>%
+  do(tidy(cor(.$total.cost, .$n.pubs))) 
+
 ```
 
 ## Problem 5 (extra credit)
@@ -98,6 +122,16 @@ Correlate [`rcr`](https://icite.od.nih.gov/) values from the `publications` tabl
 - type of grant (e.g. R01, P01, R21, etc.). 
 
 ```{r extra_credit}
+#Calculate the correlation between rcr and total cost for all funding types. 
+
+inner_join(publinks, projects, by = "project.num") %>%
+  left_join(publications, by = "pmid") %>%
+  left_join(project_io, by = "project.num") %>% 
+  na.omit(rcr) -> compiled
+  group_by(compiled, activity) %>% 
+  do(tidy(cor(.$total.cost, .$rcr)))
+
+
 ```
 
 ## Problem 6 (extra extra credit)
@@ -105,4 +139,16 @@ Correlate [`rcr`](https://icite.od.nih.gov/) values from the `publications` tabl
 Use [`gganimate`](https://github.com/dgrtwo/gganimate) to illustrate the change in cost of R01s for a few institutes over time.
 
 ```{r extra_extra_credit}
+
+library(gganimate)
+group_by(compiled, total.cost, activity, fiscal.year)
+filter(compiled, activity == "R01", institute %in% c("AA", "AG", "AI", "AR", "AT")) -> compiled2
+plotme <- ggplot(compiled2, aes(fiscal.year, total.cost, frame = fiscal.year, color = factor(institute))) + geom_point()
+
+gganimate(plotme, "name.gif")
+
 ```
+
+![imagetoshowup](name.gif)
+
+
